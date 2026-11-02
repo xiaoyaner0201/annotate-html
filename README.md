@@ -100,14 +100,14 @@ Set `window.AnnotateHtmlConfig = {...}` before loading the script. `data-endpoin
 | --- | --- | --- |
 | `endpoint` / `onSubmit(payload, files)` | unset | Enable Submit; POST multipart or custom promise hook. Without either, Submit is hidden (including extension mode). |
 | `headers` | `{}` | Additional same-origin POST headers; do not set `Content-Type` for multipart. |
-| `kinds` | `['bug','request','agent']` | Submission type options. |
+| `kinds` | `['bug','request','agent']` | Submission type options: strings or `{value,label}` objects. Default values have translated UI labels in `zh-CN`; custom labels are shown as supplied. |
 | `lang` | `en` | `en` or `zh-CN`. |
 | `ui` | `true` | Set `false` for headless QA scripts. |
 | `screenshot` | `false` | Default screenshot toggle for new annotations. |
 | `screenshotPadding` / `screenshotRegion` | `120` / target | Pixels around target or `viewport`. |
-| `screenshotRenderer` | safe canvas | `html2canvas` for higher-fidelity rendering on compatible policies. |
+| `screenshotRenderer` | `html2canvas-pro` | Faithful modern-CSS rendering by default; safe Canvas2D automatically takes over if vendor loading/rendering/export fails. |
 | `screenshotType` / `screenshotQuality` | PNG / `0.9` | Optional JPEG and encoding quality. |
-| `vendorUrl` | sibling `vendor/html2canvas.min.js` | Same-origin vendor override. |
+| `vendorUrl` | sibling `vendor/html2canvas-pro.min.js` | Same-origin vendor override. |
 | `maskSelectors` / `maskAllInputs` | `['[data-annotate-mask]','.rr-mask','.rr-block']` / `false` | Solid-block screenshot redaction; passwords always masked. |
 | `semanticAttributes` | common data-test attributes | Element metadata lookup. |
 | `appVersion` | version meta tag | String or function. |
@@ -136,7 +136,7 @@ api.list(); api.remove('ann-1'); api.clear(); api.configure({clearOnSubmit:false
 
 The widget uses a single open shadow root, constructable stylesheets and CSSOM setters; it does not insert inline style attributes or global CSS. Scripts and the optional vendored html2canvas file must be served from the app's origin. No external fonts are required. Three policy fixtures are exercised by Playwright tests.
 
-The default safe-canvas renderer intentionally approximates page boxes and text instead of embedding the DOM as images: this avoids `data:` image violations on restrictive `img-src 'self'` policies. Use `screenshotRenderer:'html2canvas'` for greater fidelity where the host policy permits its internal `data:` image probes; under `img-src 'self'` those probes generate CSP violations even when the resulting canvas exports. Passwords are always drawn as solid blocks; other configured masks are applied before rasterization. Sensitive values in DOM metadata or comments are **not** automatically redacted. Preview thumbnails may be unavailable under policies disallowing `blob:` images.
+The default renderer is the vendored [html2canvas-pro 2.6.0](https://github.com/yorickshan/html2canvas-pro) (MIT; see `vendor/html2canvas-pro.LICENSE`), which supports `oklch()`, `color()` and `color-mix()` in modern apps. The safe Canvas2D renderer is only a fallback; `annotations[].screenshot.renderer` identifies `html2canvas-pro` or `fallback`, and `error` explains a fallback. Playwright captures succeed under strict `img-src 'self'`, BI-style and Next-style CSP fixtures with **no `securitypolicyviolation` events** in these fixtures: the default path disables CORS/tainted/foreign-object rendering and ignores data-URL `<img>` elements. Other host content or policies may differ. Passwords are always drawn as solid blocks; other configured masks are applied before rasterization. Sensitive values in DOM metadata or comments are **not** automatically redacted. The preview uses canvas rather than a blob URL image.
 
 ## License
 

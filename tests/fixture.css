@@ -1,0 +1,5 @@
+:root { --surface: oklch(0.19 0.03 260); --accent: color(srgb 0.12 0.55 0.84); }
+body { background: var(--surface); color: oklch(0.92 0.02 250); font: 16px system-ui; margin: 32px; }
+#panel { background: color-mix(in srgb, var(--surface) 80%, white); padding: 28px; border-radius: 16px; width: 440px; box-shadow: 0 12px 35px #0006; }
+#target { background: var(--accent); color: white; padding: 18px 32px; border: 0; border-radius: 10px; font-weight: 700; }
+#secret { display: block; margin-top: 18px; width: 180px; height: 30px; }

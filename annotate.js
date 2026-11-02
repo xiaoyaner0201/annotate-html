@@ -35,12 +35,19 @@
   if (data.kinds) config.kinds = data.kinds.split(',');
   if (data.position) config.position = data.position;
   if (data.startHidden != null) config.startHidden = data.startHidden !== 'false';
-  const t = (en) => config.lang === 'zh-CN' ? ({Annotate:'标注', 'Change marker color':'更改标记颜色',
+  const zhCN = {Annotate:'标注', 'Change marker color':'更改标记颜色',
     'Show or hide markers':'显示或隐藏标记', 'Copy feedback':'复制反馈', 'Clear all':'清空', Close:'关闭',
     'What should change?':'需要修改什么？', Cancel:'取消', Add:'添加', Save:'保存',
-    'Delete annotation':'删除标注', Submit:'提交', Screenshot:'截图', Title:'标题',
+    'Delete annotation':'删除标注', Submit:'提交', Screenshot:'截图', Title:'标题', Kind:'类型',
     'No annotations':'没有标注', 'Copied to clipboard':'已复制到剪贴板',
-    'Submit feedback':'提交反馈', Retry:'重试', bug:'问题', request:'需求', agent:'智能体'}[en] || en) : en;
+    'Submit feedback':'提交反馈', Retry:'重试', Submitted:'已提交',
+    'Toggle mode':'切换标注模式', 'Marker color':'标记颜色', 'Show/hide markers':'显示/隐藏标记',
+    'Copy markdown':'复制标注内容', 'Open annotate toolbar':'打开标注工具栏',
+    'Open annotate-html (':'打开标注工具栏 (', 'Remove guide':'删除辅助线',
+    'Red':'红色', 'Orange':'橙色', 'Amber':'琥珀色', 'Green':'绿色',
+    'Cyan':'青色', 'Blue':'蓝色', 'Purple':'紫色',
+    bug:'提缺陷', request:'提需求', agent:'交给 Agent'};
+  const t = (en) => config.lang === 'zh-CN' ? (zhCN[en] || en) : en;
   const host = document.createElement('annotate-html-widget');
   const root = host.attachShadow({mode:'open'});
   const consoleEvents = [], networkEvents = [];
@@ -1505,8 +1512,9 @@
     if (colorPicker) { closeColorPicker(); return; }
     colorPicker = el("div", { id: "ann-color-picker" });
 
-    MARKER_COLORS.forEach(function (hex) {
-      var opt = el("div", { className: "ann-color-opt" + (hex === state.markerColor ? " active" : "") });
+    MARKER_COLORS.forEach(function (hex,index) {
+      var opt = el("div", { className: "ann-color-opt" + (hex === state.markerColor ? " active" : ""),
+        role:'button', tabindex:'0', 'aria-label':t(['Orange','Red','Amber','Green','Cyan','Blue','Purple'][index]) });
       opt.style.background = hex;
       opt.addEventListener("click", function (e) {
         e.stopPropagation();
@@ -1994,7 +2002,7 @@
       if(rootNode instanceof ShadowRoot) result.shadowPath=rootNode.host.localName;
       if(window.frameElement) result.iframePath=window.frameElement.id || window.frameElement.localName;
       try {const fiberKey=Object.keys(target).find(k=>k.startsWith('__reactFiber$')); let fiber=fiberKey && target[fiberKey], names=[];
-        while(fiber && names.length<8) {const type=fiber.type; if(type && typeof type!=='string') {const n=type.displayName||type.name;if(n) names.push(n);if(fiber._debugSource) result.reactSource=shorten(fiber._debugSource.fileName)+':'+fiber._debugSource.lineNumber;}fiber=fiber.return;} if(names.length)result.reactComponents=names;
+        while(fiber && names.length<8) {const type=fiber.type; if(type && typeof type!=='string') {const n=type.displayName||type.name;if(typeof n==='string' && n.length>3 && !n.includes('$')) names.push(n);if(fiber._debugSource) result.reactSource=shorten(fiber._debugSource.fileName)+':'+fiber._debugSource.lineNumber;}fiber=fiber.return;} if(names.length)result.reactComponents=names;
       } catch(_){}
       try {const vue=target.__vueParentComponent;if(vue) {result.vueComponent=vue.type && (vue.type.name||vue.type.__name);result.vueSource=vue.type && vue.type.__file;} } catch(_){}
       return result;
@@ -2049,7 +2057,7 @@
   function loadCanvas() {
     if(window.html2canvas) return Promise.resolve(window.html2canvas);
     if(!canvasLoading) canvasLoading=new Promise((resolve,reject)=>{
-      const vendor=document.createElement('script'); vendor.src=config.vendorUrl || new URL('vendor/html2canvas.min.js',script && script.src || location.href).href;
+      const vendor=document.createElement('script'); vendor.src=config.vendorUrl || new URL('vendor/html2canvas-pro.min.js',script && script.src || location.href).href;
       vendor.onload=()=>window.html2canvas?resolve(window.html2canvas):reject(new Error('Screenshot vendor unavailable'));
       vendor.onerror=()=>reject(new Error('Screenshot vendor blocked'));document.head.appendChild(vendor);
     }).catch(e=>{canvasLoading=null;throw e;});
@@ -2066,21 +2074,27 @@
     if(config.maskAllInputs) maskSelectors.push('input','textarea');
     const hidden=host.style.getPropertyValue('visibility'); host.style.setProperty('visibility','hidden','important');
     try {
-      const canvas=config.screenshotRenderer==='html2canvas' ? await (await loadCanvas())(document.body,{backgroundColor:'#ffffff',useCORS:false,allowTaint:false,
-        foreignObjectRendering:false,logging:false,scale:1,x:region.x+scrollX,y:region.y+scrollY,width:region.width,height:region.height,
-        ignoreElements:node=>node===host,
-        onclone:doc=>{for(const selector of maskSelectors) {try {for(const node of doc.querySelectorAll(selector)) {
-          const cover=doc.createElement('span'),rect=node.getBoundingClientRect();
-          cover.style.setProperty('position','absolute');cover.style.setProperty('left',(rect.left+scrollX)+'px');cover.style.setProperty('top',(rect.top+scrollY)+'px');
-          cover.style.setProperty('width',rect.width+'px');cover.style.setProperty('height',rect.height+'px');
-          cover.style.setProperty('background','#222');cover.style.setProperty('z-index','2147483646');doc.body.appendChild(cover);
-        }}catch(_){} }
-        }
-      }) : safeCanvas(region);
+      let renderer='html2canvas-pro', error, canvas;
+      try {
+        canvas=await (await loadCanvas())(document.body,{backgroundColor:'#ffffff',useCORS:false,allowTaint:false,
+          foreignObjectRendering:false,logging:false,scale:1,x:region.x+scrollX,y:region.y+scrollY,width:region.width,height:region.height,
+          ignoreElements:node=>node===host || (node.tagName==='IMG' && /^data:/i.test(node.getAttribute('src')||'')),
+          onclone:doc=>{for(const selector of maskSelectors) {try {for(const node of doc.querySelectorAll(selector)) {
+            const cover=doc.createElement('span'),rect=node.getBoundingClientRect();
+            cover.style.setProperty('position','absolute');cover.style.setProperty('left',(rect.left+scrollX)+'px');cover.style.setProperty('top',(rect.top+scrollY)+'px');
+            cover.style.setProperty('width',rect.width+'px');cover.style.setProperty('height',rect.height+'px');
+            cover.style.setProperty('background','#222');cover.style.setProperty('z-index','2147483646');doc.body.appendChild(cover);
+          }}catch(_){} }
+          }
+        });
+      } catch(e) {renderer='fallback';error=shorten(e && e.message || e);canvas=safeCanvas(region);}
       const type=config.screenshotType==='image/jpeg'?'image/jpeg':'image/png';
-      const blob=await new Promise(resolve=>canvas.toBlob(resolve,type,config.screenshotQuality||0.9));
+      let blob=await new Promise(resolve=>canvas.toBlob(resolve,type,config.screenshotQuality||0.9));
+      if(!blob && renderer==='html2canvas-pro') {renderer='fallback';error='Screenshot export failed';canvas=safeCanvas(region);
+        blob=await new Promise(resolve=>canvas.toBlob(resolve,type,config.screenshotQuality||0.9));}
       if(!blob)throw new Error('Screenshot export failed');
-      a.blob=blob;a.screenshot={part:'screenshot-'+a.id,width:canvas.width,height:canvas.height,type:blob.type,region};
+      a.blob=blob;a.screenshot={part:'screenshot-'+a.id,width:canvas.width,height:canvas.height,type:blob.type,region,renderer};
+      if(error)a.screenshot.error=error;
       return blob;
     }finally {host.style.setProperty('visibility',hidden||'visible','important');}
   }
@@ -2121,12 +2135,16 @@
   function showSubmitForm() {
     closePopup();popup=el('div',{id:'ann-popup'});popup.classList.add('ann-submit-form');
     const heading=el('strong',{},'Submit feedback'),kind=el('select',{'aria-label':'Kind'});
-    for(const value of config.kinds)kind.appendChild(el('option',{value},value));
+    for(const entry of config.kinds) {
+      const value=typeof entry==='string'?entry:entry.value;
+      const label=typeof entry==='string'?t(value):entry.label;
+      const option=el('option',{},label);option.value=value;kind.appendChild(option);
+    }
     const title=el('input',{type:'text',placeholder:'Title','aria-label':'Title'});
     const status=el('div',{id:'ann-submit-status'}), actions=el('div',{className:'ann-popup-actions'});
     const cancel=el('button',{onClick:closePopup},'Cancel'),send=el('button',{className:'primary'},'Submit');
     send.onclick=async()=>{send.disabled=true;status.textContent='';try{const result=await submitFeedback({kind:kind.value,title:title.value});
-      status.textContent=String(result && result.message || 'Submitted');
+      status.textContent=String(result && result.message || t('Submitted'));
       if(result && result.url) {const url=new URL(result.url,location.href);if(['http:','https:'].includes(url.protocol)){
         const link=el('a',{href:url.href,target:'_blank',rel:'noopener noreferrer'},url.href);status.appendChild(link);}}
     }catch(e){status.textContent=e.message;send.textContent=t('Retry');}finally{send.disabled=false;}};

@@ -13,7 +13,7 @@
     "reporter": {"type": "object", "required": ["type"], "properties": {"type": {"enum": ["human", "agent"]}, "name": {"type": "string"}, "id": {"type": "string"}}},
     "page": {"type": "object"},
     "app": {"type": "object", "properties": {"version": {"type": "string"}}},
-    "annotations": {"type": "array", "items": {"type": "object", "required": ["id", "comment", "element"], "properties": {"id": {"type": "string"}, "comment": {"type": "string"}, "element": {"type": "object"}, "screenshot": {"type": "object", "required": ["part", "width", "height", "type", "region"], "properties": {"part": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "type": {"enum": ["image/png", "image/jpeg"]}, "region": {"type": "object"}}}}}},
+    "annotations": {"type": "array", "items": {"type": "object", "required": ["id", "comment", "element"], "properties": {"id": {"type": "string"}, "comment": {"type": "string"}, "element": {"type": "object"}, "screenshot": {"type": "object", "required": ["part", "width", "height", "type", "region"], "properties": {"part": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "type": {"enum": ["image/png", "image/jpeg"]}, "region": {"type": "object"}, "renderer": {"enum": ["html2canvas-pro", "fallback"]}, "error": {"type": "string"}}}}}},
     "console": {"type": "array", "items": {"type": "object"}},
     "network": {"type": "array", "items": {"type": "object"}},
     "markdown": {"type": "string"}
