@@ -22,6 +22,53 @@
     return;
   }
 
+  const script = document.currentScript;
+  const data = script && script.dataset || {};
+  let config = Object.assign({lang: 'en', screenshot: false, screenshotPadding: 120,
+    maskSelectors: ['[data-annotate-mask]', '.rr-mask', '.rr-block'],
+    semanticAttributes: ['data-testid','data-test','data-qa','data-cy','data-action','data-track','data-component'],
+    kinds: ['bug','request','agent'], clearOnSubmit: true, context: {}, maxEvents: 20,
+    responseHeaders: ['x-request-id','x-trace-id','traceparent']}, window.AnnotateHtmlConfig || {});
+  if (data.endpoint) config.endpoint = data.endpoint;
+  if (data.lang) config.lang = data.lang;
+  if (data.screenshot != null) config.screenshot = data.screenshot === 'true';
+  if (data.kinds) config.kinds = data.kinds.split(',');
+  if (data.position) config.position = data.position;
+  if (data.startHidden != null) config.startHidden = data.startHidden !== 'false';
+  const t = (en) => config.lang === 'zh-CN' ? ({Annotate:'标注', 'Change marker color':'更改标记颜色',
+    'Show or hide markers':'显示或隐藏标记', 'Copy feedback':'复制反馈', 'Clear all':'清空', Close:'关闭',
+    'What should change?':'需要修改什么？', Cancel:'取消', Add:'添加', Save:'保存',
+    'Delete annotation':'删除标注', Submit:'提交', Screenshot:'截图', Title:'标题',
+    'No annotations':'没有标注', 'Copied to clipboard':'已复制到剪贴板',
+    'Submit feedback':'提交反馈', Retry:'重试', bug:'问题', request:'需求', agent:'智能体'}[en] || en) : en;
+  const host = document.createElement('annotate-html-widget');
+  const root = host.attachShadow({mode:'open'});
+  const consoleEvents = [], networkEvents = [];
+  const record = (buffer, entry) => { buffer.push(entry); if (buffer.length > config.maxEvents) buffer.shift(); };
+  const shorten = value => String(value == null ? '' : value).slice(0, 500);
+  const safeUrl = value => { try {
+    const u = new URL(String(value), location.href);
+    for (const key of [...u.searchParams.keys()]) if (/token|key|secret|password|auth|session|code/i.test(key)) u.searchParams.delete(key);
+    u.hash = ''; return u.href;
+  } catch (_) { return '[invalid URL]'; } };
+  const originalConsole = {};
+  ['warn','error'].forEach(level => { const original = console[level]; originalConsole[level] = original;
+    console[level] = function (...args) { try { record(consoleEvents, {level, message: shorten(args.map(a => typeof a === 'string' ? a : String(a)).join(' ')), timestamp: new Date().toISOString()}); } catch (_) {} return original.apply(this, args); };
+  });
+  window.addEventListener('error', e => record(consoleEvents, {level:'error', message:shorten(e.message), stack:shorten(e.error && e.error.stack), timestamp:new Date().toISOString()}));
+  window.addEventListener('unhandledrejection', e => record(consoleEvents, {level:'error', message:shorten(e.reason), stack:shorten(e.reason && e.reason.stack), timestamp:new Date().toISOString()}));
+  function networkRecord(method, url, status, start, headers) { try {
+    const selected = {}; for (const key of config.responseHeaders) { const value = headers && headers.get(key); if (value) selected[key] = shorten(value); }
+    record(networkEvents, {method:shorten(method || 'GET'), url:safeUrl(url), status:status || 0, duration:Math.round(performance.now()-start), ok:status >= 200 && status < 400, headers:selected});
+  } catch (_) {} }
+  if (window.fetch) { const nativeFetch = window.fetch; window.fetch = function (input, init) {
+    const start = performance.now(), method = init && init.method || input && input.method || 'GET', url = typeof input === 'string' || input instanceof URL ? input : input && input.url;
+    return nativeFetch.apply(this, arguments).then(response => { networkRecord(method,url,response.status,start,response.headers); return response; }, error => { networkRecord(method,url,0,start); throw error; });
+  }; }
+  const xhrOpen = XMLHttpRequest.prototype.open, xhrSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(method,url) { try { this.__annRequest = {method,url}; } catch (_) {} return xhrOpen.apply(this,arguments); };
+  XMLHttpRequest.prototype.send = function() { try { const request=this.__annRequest, start=performance.now(); if(request) this.addEventListener('loadend', () => networkRecord(request.method,request.url,this.status,start,{get:key => this.getResponseHeader(key)}), {once:true}); } catch (_) {} return xhrSend.apply(this,arguments); };
+
   // ═══════════════════════════════════════════
   // State
   // ═══════════════════════════════════════════
@@ -278,10 +325,7 @@
   // ═══════════════════════════════════════════
 
   function injectStyles() {
-    if (document.getElementById("annotate-js-styles")) return;
-    var style = document.createElement("style");
-    style.id = "annotate-js-styles";
-    style.textContent = [
+    var css = [
       // Design tokens (Claude-native palette)
       // --ann-bg:        #FAF9F5  cream surface
       // --ann-bg-alt:    #F5F4ED  recessed surface
@@ -411,7 +455,6 @@
 
       '#ann-toolbar select{appearance:none;-webkit-appearance:none;-moz-appearance:none;',
       'background-color:#F5F4ED;',
-      'background-image:url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2375726B\' stroke-width=\'2.5\' stroke-linecap=\'round\' stroke-linejoin=\'round\'><path d=\'m6 9 6 6 6-6\'/></svg>");',
       'background-repeat:no-repeat;background-position:right 9px center;',
       'border:1px solid rgba(31,30,29,.08);',
       'color:#1F1E1D;border-radius:8px;padding:5px 26px 5px 10px;',
@@ -533,27 +576,6 @@
       '@media (hover:hover){#ann-popup .ann-popup-actions button.icon-only:hover{',
       'background:rgba(201,100,66,.10);color:#C96442}}',
 
-      // Active cursor — asterisk SVG
-      "body.ann-active{cursor:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 155 157' fill='none'%3E%3Cpath d='M58.8282 156.513L62.2248 103.934L18.2055 133.416L0 101.353L47.4158 78.2565L0 55.1599L18.2055 23.0965L62.2248 52.5786L58.8282 0H95.3751L91.8427 52.5786L135.862 23.0965L154.067 55.1599L106.787 78.2565L154.067 101.353L135.862 133.416L91.8427 103.934L95.3751 156.513H58.8282Z' fill='%23C96442'/%3E%3C/svg%3E\") 14 14,crosshair !important}",
-      'body.ann-active *{cursor:inherit !important}',
-      // Override crosshair on the tool's own UI
-      'body.ann-active #ann-toolbar{cursor:grab !important}',
-      'body.ann-active #ann-toolbar *,',
-      'body.ann-active #ann-color-picker,body.ann-active #ann-color-picker *,',
-      'body.ann-active #ann-popup,body.ann-active #ann-popup *,',
-      'body.ann-active .ann-marker,body.ann-active .ann-marker *{cursor:auto !important}',
-      'body.ann-active #ann-ruler-h,body.ann-active #ann-ruler-v{cursor:crosshair !important}',
-      'body.ann-active #ann-ruler-corner{cursor:default !important}',
-      'body.ann-active #ann-toolbar button,body.ann-active #ann-toolbar .ann-color-swatch,',
-      'body.ann-active #ann-color-picker .ann-color-opt,',
-      'body.ann-active .ann-collapsed-view,',
-      'body.ann-active #ann-popup button,body.ann-active #ann-popup .ann-popup-header,',
-      'body.ann-active .ann-marker{cursor:pointer !important}',
-      'body.ann-active #ann-popup textarea{cursor:text !important}',
-      'body.ann-active .ann-guide-handle{cursor:grab !important}',
-      'body.ann-active .ann-guide-handle:active{cursor:grabbing !important}',
-      'body.ann-active .ann-guide-close{cursor:pointer !important}',
-
       // Copied toast
       '#ann-toast{position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-12px);',
       'z-index:99999;background:#1F1E1D;color:#FAF9F5;padding:10px 18px;',
@@ -623,13 +645,24 @@
       '.ann-guide-h::before{left:0;right:0;top:-4px;bottom:-4px}',
       '.ann-guide-v::before{top:0;bottom:0;left:-4px;right:-4px}',
 
+      '#ann-submit{position:fixed;bottom:90px;right:24px;z-index:99998;background:#FAF9F5}',
+      '#ann-popup.ann-submit-form{display:flex;flex-direction:column;gap:12px;min-width:320px}',
+      '#ann-popup.ann-submit-form input,#ann-popup.ann-submit-form select{background:#F5F4ED;color:#1F1E1D;border:1px solid #ddd;border-radius:9px;padding:9px;font:inherit}',
+      '#ann-popup label{display:flex;gap:7px;align-items:center;font-size:12px;color:#75726B;margin-top:8px}',
+      '#ann-popup .ann-preview{max-width:120px;max-height:80px;object-fit:contain;border-radius:6px;margin-top:8px}',
+      '#ann-markers{position:absolute;top:0;left:0;width:0;height:0;overflow:visible;z-index:99992}',
       // Reduced motion
       '@media (prefers-reduced-motion:reduce){',
       '#ann-toolbar,#ann-popup,#ann-toast,.ann-marker,#ann-hover-highlight,',
       '#ann-ruler-h,#ann-ruler-v,#ann-ruler-corner{',
       'transition:none !important;animation:none !important}}',
     ].join("\n");
-    document.head.appendChild(style);
+    if ('adoptedStyleSheets' in root) {
+      const sheet = new CSSStyleSheet(); sheet.replaceSync(':host{all:initial;position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;font-family:system-ui,sans-serif;color:#1F1E1D} :host *{box-sizing:border-box} #ann-toolbar,#ann-popup,#ann-submit,#ann-color-picker,.ann-marker,.ann-guide,#ann-ruler-h,#ann-ruler-v,#ann-tip{pointer-events:auto} ' + css);
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+    } else if (config.styleNonce) { const style=document.createElement('style'); style.nonce=config.styleNonce; style.textContent=css; root.appendChild(style);
+    } else if (config.cssUrl) { const link=document.createElement('link'); link.rel='stylesheet'; link.href=config.cssUrl; root.appendChild(link); }
+    else throw new Error('Constructable stylesheets unavailable: supply styleNonce or cssUrl');
   }
 
   // ═══════════════════════════════════════════
@@ -641,10 +674,10 @@
     if (attrs) Object.keys(attrs).forEach(function (k) {
       if (k === "className") e.className = attrs[k];
       else if (k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
-      else e.setAttribute(k, attrs[k]);
+      else e.setAttribute(k, typeof attrs[k] === "string" ? t(attrs[k]) : attrs[k]);
     });
     if (children) {
-      if (typeof children === "string") e.textContent = children;
+      if (typeof children === "string") e.textContent = t(children);
       else if (Array.isArray(children)) children.forEach(function (c) { if (c) e.appendChild(c); });
       else e.appendChild(children);
     }
@@ -756,17 +789,12 @@
     state.markerColor = hex;
     if (colorSwatch) colorSwatch.style.background = hex;
 
-    if (!accentSheet) {
-      accentSheet = document.createElement("style");
-      accentSheet.id = "ann-accent-styles";
-      document.head.appendChild(accentSheet);
-    }
-
+    if (!accentSheet) { accentSheet = new CSSStyleSheet(); root.adoptedStyleSheets = [...root.adoptedStyleSheets, accentSheet]; }
     var bg10 = hex + "1A";   // 10%
     var bg42 = hex + "6B";   // 42%
     var dark = darkenHex(hex, 20);
 
-    accentSheet.textContent = [
+    accentSheet.replaceSync([
       "#ann-toolbar button.active{background:" + bg10 + ";color:" + hex + "}",
       "#ann-toolbar .ann-eye-badge{background:" + hex + "}",
       ".ann-collapsed-view{color:" + hex + "}",
@@ -776,12 +804,11 @@
       "#ann-popup textarea:focus{border-color:" + hex + "}",
       "#ann-popup .ann-popup-actions button.primary{background:" + hex + ";border-color:" + hex + "}",
       "#ann-toast svg{color:" + hex + "}",
-      "body.ann-active{cursor:" + cursorSvg(hex) + " !important}",
       "@media (hover:hover){",
       "#ann-popup .ann-popup-actions button.primary:hover{background:" + dark + ";border-color:" + dark + "}",
       "#ann-popup .ann-popup-actions button.icon-only:hover{background:" + bg10 + ";color:" + hex + "}",
       ".ann-marker:hover .ann-marker-circle{box-shadow:0 2px 4px rgba(31,30,29,.12),0 8px 22px " + bg42 + "}}",
-    ].join("\n");
+    ].join("\n"));
 
     renderMarkers();
   }
@@ -789,7 +816,7 @@
   function addTip(target, text, key) {
     target.addEventListener("mouseenter", function () {
       if (!tipEl) return;
-      tipEl.innerHTML = escHtml(text) + (key ? '<span class="ann-tip-key">' + escHtml(key) + '</span>' : "");
+      tipEl.innerHTML = escHtml(t(text)) + (key ? '<span class="ann-tip-key">' + escHtml(key) + '</span>' : "");
       var r = target.getBoundingClientRect();
       tipEl.style.left = (r.left + r.width / 2) + "px";
       tipEl.style.top = (r.top - 8) + "px";
@@ -811,33 +838,35 @@
 
     // Hover highlight box
     hoverHighlight = el("div", { id: "ann-hover-highlight" });
+    if (!hoverHighlight) return;
     hoverHighlight.style.display = "none";
-    document.body.appendChild(hoverHighlight);
+    root.appendChild(hoverHighlight);
 
     // Hover label
     hoverLabel = el("div", { id: "ann-hover-label" });
     hoverLabel.style.display = "none";
-    document.body.appendChild(hoverLabel);
+    root.appendChild(hoverLabel);
 
     // Markers container
-    markersContainer = el("div", { id: "ann-markers", style: "position:absolute;top:0;left:0;width:0;height:0;overflow:visible;z-index:99992" });
-    document.body.appendChild(markersContainer);
+    markersContainer = el("div", { id: "ann-markers" });
+    root.appendChild(markersContainer);
 
     // Toast
     toast = el("div", { id: "ann-toast" });
     toast.appendChild(iconEl("check"));
-    toast.appendChild(document.createTextNode("Copied to clipboard"));
-    document.body.appendChild(toast);
+    toast.appendChild(document.createTextNode(t("Copied to clipboard")));
+    root.appendChild(toast);
 
     // Build toolbar
     toolbar = el("div", { id: "ann-toolbar" });
 
+    if (config.position === 'left') { toolbar.style.right='auto'; toolbar.style.left='24px'; }
     var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
     var altKey = isMac ? "\u2325" : "Alt";
 
     // Shared tooltip element
     tipEl = el("div", { id: "ann-tip" });
-    document.body.appendChild(tipEl);
+    root.appendChild(tipEl);
 
     // Toggle annotate mode
     var toggleBtn = el("button", {
@@ -845,7 +874,7 @@
     });
     toggleBtn.id = "ann-toggle-btn";
     toggleBtn.appendChild(iconEl("asterisk"));
-    toggleBtn.appendChild(document.createTextNode("Annotate"));
+    toggleBtn.appendChild(document.createTextNode(t("Annotate")));
 
     // Color swatch
     colorSwatch = el("div", {
@@ -914,6 +943,10 @@
     toolbar.appendChild(divider1);
     toolbar.appendChild(eyeBtn);
     toolbar.appendChild(copyBtn);
+    if (config.endpoint || config.onSubmit) {
+      var submitBtn = el('button', {id:'ann-submit-btn', onClick: showSubmitForm, 'aria-label':'Submit'}, 'Submit');
+      toolbar.appendChild(submitBtn);
+    }
     toolbar.appendChild(clearBtn);
     toolbar.appendChild(divider3);
     toolbar.appendChild(closeBtn);
@@ -935,7 +968,7 @@
     });
     toolbar.appendChild(collapsedView);
 
-    document.body.appendChild(toolbar);
+    root.appendChild(toolbar);
 
     // Make toolbar draggable
     initToolbarDrag();
@@ -1063,21 +1096,21 @@
 
   function createRulers() {
     rulerCorner = el("div", { id: "ann-ruler-corner" });
-    document.body.appendChild(rulerCorner);
+    root.appendChild(rulerCorner);
 
     rulerH = el("div", { id: "ann-ruler-h" });
     rulerHCanvas = document.createElement("canvas");
     rulerHCanvas.height = 20;
     rulerH.appendChild(rulerHCanvas);
     initRulerDrag(rulerH, "v");
-    document.body.appendChild(rulerH);
+    root.appendChild(rulerH);
 
     rulerV = el("div", { id: "ann-ruler-v" });
     rulerVCanvas = document.createElement("canvas");
     rulerVCanvas.width = 20;
     rulerV.appendChild(rulerVCanvas);
     initRulerDrag(rulerV, "h");
-    document.body.appendChild(rulerV);
+    root.appendChild(rulerV);
 
     drawRulers();
   }
@@ -1093,7 +1126,7 @@
       preview.style.opacity = "0.5";
       var lbl = el("span", { className: "ann-guide-label" }, "0px");
       preview.appendChild(lbl);
-      document.body.appendChild(preview);
+      root.appendChild(preview);
 
       function onMove(ev) {
         if (!preview) return;
@@ -1265,7 +1298,7 @@
       if (e.target === guide || e.target === guide.querySelector("::before")) startDrag(e);
     });
 
-    document.body.appendChild(guide);
+    root.appendChild(guide);
     guides.push(guide);
   }
 
@@ -1342,13 +1375,13 @@
 
   function toggleActive() {
     state.active = !state.active;
-    var btn = document.getElementById("ann-toggle-btn");
+    var btn = root.getElementById("ann-toggle-btn");
     if (state.active) {
       btn.classList.add("active");
-      document.body.classList.add("ann-active");
+
     } else {
       btn.classList.remove("active");
-      document.body.classList.remove("ann-active");
+
       hideHover();
       closePopup();
     }
@@ -1427,7 +1460,7 @@
     for (var i = 0; i < toast.childNodes.length; i++) {
       if (toast.childNodes[i].nodeType === 3) { tn = toast.childNodes[i]; break; }
     }
-    if (tn) tn.nodeValue = msg || "Copied to clipboard";
+    if (tn) tn.nodeValue = t(msg || "Copied to clipboard");
     else toast.appendChild(document.createTextNode(msg || "Copied to clipboard"));
     toast.classList.add("show");
     setTimeout(function () { toast.classList.remove("show"); }, 1800);
@@ -1488,7 +1521,7 @@
     colorPicker.style.bottom = (window.innerHeight - swRect.top + 8) + "px";
     colorPicker.style.right = (window.innerWidth - swRect.right) + "px";
 
-    document.body.appendChild(colorPicker);
+    root.appendChild(colorPicker);
   }
 
   // ═══════════════════════════════════════════
@@ -1557,6 +1590,8 @@
     var hp = buildPopupHeader(info.name, info.target);
     var textarea = el("textarea", { placeholder: "What should change?", rows: "3" });
 
+    var screenshotToggle = el('input',{type:'checkbox'}); screenshotToggle.checked=!!config.screenshot;
+    var screenshotLabel=el('label',{},[screenshotToggle,document.createTextNode(t('Screenshot'))]);
     var cancelBtn = el("button", { onClick: function () { closePopup(); } }, "Cancel");
     var addBtn = el("button", { className: "primary", onClick: function () {
       var comment = textarea.value.trim();
@@ -1579,7 +1614,12 @@
         computedStyles: getComputedSnapshot(info.target),
       };
 
+      annotation.elementInfo = elementInfo(info.target);
+      annotation.target = info.target;
+      annotation.screenshotEnabled = screenshotToggle && screenshotToggle.checked;
       state.annotations.push(annotation);
+      window.dispatchEvent(new CustomEvent('annotate:created',{detail:annotation}));
+      if (annotation.screenshotEnabled) captureAnnotation(annotation).catch(e => window.dispatchEvent(new CustomEvent('annotate:error',{detail:e})));
       updateCount();
       renderMarkers();
       closePopup();
@@ -1594,10 +1634,11 @@
     popup.appendChild(hp.header);
     popup.appendChild(hp.styles);
     popup.appendChild(textarea);
+    popup.appendChild(screenshotLabel);
     popup.appendChild(actions);
 
     positionPopup(clickX, clickY);
-    document.body.appendChild(popup);
+    root.appendChild(popup);
     textarea.focus();
 
     textarea.addEventListener("keydown", function (e) {
@@ -1623,6 +1664,10 @@
     var hp = buildPopupHeader(ann.element, pairs);
     var textarea = el("textarea", { placeholder: "What should change?", rows: "3" });
     textarea.value = ann.comment;
+    if(ann.blob) { const preview=el('canvas',{className:'ann-preview'});
+      createImageBitmap(ann.blob).then(bitmap=>{preview.width=Math.min(120,bitmap.width);preview.height=Math.max(1,Math.round(bitmap.height*preview.width/bitmap.width));preview.getContext('2d').drawImage(bitmap,0,0,preview.width,preview.height);bitmap.close();}).catch(()=>{});
+      popup.appendChild(preview);
+    }
 
     var trashBtn = el("button", {
       className: "icon-only",
@@ -1664,7 +1709,7 @@
     popup.appendChild(actions);
 
     positionPopup(x, y);
-    document.body.appendChild(popup);
+    root.appendChild(popup);
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 
@@ -1679,6 +1724,7 @@
   // ═══════════════════════════════════════════
 
   function renderMarkers() {
+    if (!markersContainer) return;
     markersContainer.innerHTML = "";
     state.annotations.forEach(function (a, i) {
       var marker = el("div", { className: "ann-marker" });
@@ -1726,6 +1772,7 @@
 
   function isToolbarElement(el) {
     if (!el) return false;
+    if (el === host || root.contains(el)) return true;
     var node = el;
     while (node) {
       if (node.id === "ann-toolbar" || node.id === "ann-popup" ||
@@ -1827,7 +1874,9 @@
   // ═══════════════════════════════════════════
 
   function init() {
-    createToolbar();
+    document.documentElement.appendChild(host);
+    if (config.ui !== false) createToolbar();
+    else { injectStyles(); markersContainer=el('div',{id:'ann-markers'}); root.appendChild(markersContainer); }
     document.addEventListener("mousemove", handleMouseMove, true);
     document.addEventListener("click", handleClick, true);
     document.addEventListener("keydown", handleKeydown);
@@ -1841,6 +1890,7 @@
       clampToolbar();
     }, { passive: true });
 
+    if (config.startHidden && toolbar) hideToolbar();
     // Edge-hover reveal for rulers
     document.addEventListener("mousemove", handleRulerProximity, { passive: true });
     document.documentElement.addEventListener("mouseleave", function () {
@@ -1851,7 +1901,14 @@
     // Publish a tiny control hook so re-injection (Chrome extension click,
     // second <script> tag, etc.) toggles this instance instead of duplicating.
     window.__annotateHtml = {
-      version: 1,
+      version: '2.0.0',
+      annotate: addAnnotation,
+      list: () => state.annotations.map(a => Object.assign({}, a, {target:undefined, blob:undefined})),
+      remove: id => { const n=state.annotations.findIndex(a=>a.id===id); if(n<0)return false; state.annotations.splice(n,1); updateCount(); renderMarkers(); return true; },
+      clear: clearAll,
+      buildPayload,
+      submit: submitFeedback,
+      configure: partial => { config=Object.assign({},config,partial); },
       toggle: function () {
         if (state.toolbarHidden) showToolbar();
         else hideToolbar();
@@ -1883,6 +1940,7 @@
               fullPath: getFullPath(target),
               accessibility: getA11yInfo(target),
               computedStyles: getComputedSnapshot(target),
+              elementInfo: elementInfo(target), target: target, screenshotEnabled: false,
             });
           });
           updateCount();
@@ -1898,6 +1956,182 @@
         }
       }
     };
+  }
+
+  function elementInfo(target) {
+    try {
+      const tag=target.localName || 'element', attrs={}, ancestors=[];
+      let node=target;
+      for(let depth=0; node && depth<6; depth++,node=node.parentElement) {
+        const found={}; for(const key of config.semanticAttributes) if(node.hasAttribute(key)) found[key]=shorten(node.getAttribute(key));
+        if(depth===0) Object.assign(attrs,found); else if(Object.keys(found).length) ancestors.push({depth, attributes:found});
+      }
+      let selector='';
+      if(target.id && document.querySelectorAll('#'+CSS.escape(target.id)).length===1) selector='#'+CSS.escape(target.id);
+      if(!selector) for(const key of config.semanticAttributes) {
+        if(target.hasAttribute(key)) { const candidate=tag+'['+key+'="'+CSS.escape(target.getAttribute(key))+'"]';
+          try {if(document.querySelectorAll(candidate).length===1) {selector=candidate; break;} } catch(_){} }
+      }
+      if(!selector) {
+        const path=[]; node=target;
+        while(node && node.nodeType===1 && node!==document.documentElement) {
+          let part=node.localName;
+          if(node.id) {part+='#'+CSS.escape(node.id); path.unshift(part); break;}
+          const siblings=node.parentElement && [...node.parentElement.children].filter(x=>x.localName===node.localName);
+          if(siblings && siblings.length>1) part+=':nth-of-type('+(siblings.indexOf(node)+1)+')';
+          path.unshift(part); node=node.parentElement;
+        }
+        selector=path.join(' > ');
+      }
+      const xpath=[]; node=target;
+      while(node && node.nodeType===1) {const siblings=node.parentElement && [...node.parentElement.children].filter(x=>x.localName===node.localName) || [node]; xpath.unshift(node.localName+'['+(siblings.indexOf(node)+1)+']'); node=node.parentElement;}
+      const result={name:identifyElement(target).name, path:getElementPath(target), selector, id:target.id||'',
+        inputName:target.getAttribute('name')||'', role:target.getAttribute('role')||'', ariaLabel:target.getAttribute('aria-label')||'',
+        attributes:attrs, ancestors, outerHTML:(target.matches('input[type="password"]') || (config.maskSelectors||[]).some(selector=>{try{return target.matches(selector)}catch(_){return false}})) ? '[masked]' : shorten(target.outerHTML).slice(0,500), xpath:'/'+xpath.join('/'),
+        classes:getClasses(target), bbox:(()=>{const r=target.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};})(),
+        computedStyles:getComputedSnapshot(target), nearbyText:shorten(getNearbyText(target)), a11y:getA11yInfo(target)};
+      const rootNode=target.getRootNode();
+      if(rootNode instanceof ShadowRoot) result.shadowPath=rootNode.host.localName;
+      if(window.frameElement) result.iframePath=window.frameElement.id || window.frameElement.localName;
+      try {const fiberKey=Object.keys(target).find(k=>k.startsWith('__reactFiber$')); let fiber=fiberKey && target[fiberKey], names=[];
+        while(fiber && names.length<8) {const type=fiber.type; if(type && typeof type!=='string') {const n=type.displayName||type.name;if(n) names.push(n);if(fiber._debugSource) result.reactSource=shorten(fiber._debugSource.fileName)+':'+fiber._debugSource.lineNumber;}fiber=fiber.return;} if(names.length)result.reactComponents=names;
+      } catch(_){}
+      try {const vue=target.__vueParentComponent;if(vue) {result.vueComponent=vue.type && (vue.type.name||vue.type.__name);result.vueSource=vue.type && vue.type.__file;} } catch(_){}
+      return result;
+    } catch(_) {return {name:target.localName||'element',selector:getElementPath(target)};}
+  }
+
+  function safeCanvas(region) {
+    const canvas=document.createElement('canvas');canvas.width=region.width;canvas.height=region.height;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    const masks=['input[type="password"]',...(config.maskSelectors||[])];if(config.maskAllInputs)masks.push('input','textarea');
+    const masked=node=>masks.some(selector=>{try{return node.matches(selector)||!!node.closest(selector);}catch(_){return false;}});
+    function paint(node,depth) {
+      if(depth>40||node===host||!node.getBoundingClientRect)return;
+      const r=node.getBoundingClientRect(),x=r.x-region.x,y=r.y-region.y;
+      if(r.width<=0||r.height<=0||x>=canvas.width||y>=canvas.height||x+r.width<=0||y+r.height<=0)return;
+      const style=getComputedStyle(node);if(style.display==='none'||style.visibility==='hidden')return;
+      if(masked(node)){ctx.fillStyle='#222';ctx.fillRect(x,y,r.width,r.height);return;}
+      const bg=style.backgroundColor;
+      if(bg && bg!=='rgba(0, 0, 0, 0)' && bg!=='transparent'){ctx.fillStyle=bg;ctx.fillRect(x,y,r.width,r.height);}
+      if(node instanceof HTMLInputElement||node instanceof HTMLTextAreaElement){
+        ctx.strokeStyle='#888';ctx.strokeRect(x,y,r.width,r.height);
+        ctx.fillStyle=style.color||'#222';ctx.font=style.font||'14px sans-serif';ctx.fillText(String(node.value||'').slice(0,100),x+5,y+Math.min(20,r.height-3));
+      } else if(node.children.length===0 && node.textContent && node.textContent.trim()){
+        ctx.fillStyle=style.color||'#222';ctx.font=style.font||'14px sans-serif';
+        ctx.fillText(node.textContent.trim().slice(0,100),x,y+Math.min(parseFloat(style.fontSize)||14,r.height));
+      }
+      for(const child of node.children)paint(child,depth+1);
+    }
+    for(const child of document.body.children)paint(child,0);
+    return canvas;
+  }
+  function makeAnnotation(target,comment,kind,screenshot) {
+    const r=target.getBoundingClientRect(), info=identifyElement(target);
+    const a={id:'ann-'+(++state.counter), x:r.x+r.width/2+scrollX, y:r.y+scrollY,
+      comment:String(comment||''), kind:kind||undefined, element:info.name,elementPath:info.path,
+      timestamp:Date.now(),boundingBox:{x:r.x,y:r.y,width:r.width,height:r.height},
+      nearbyText:getNearbyText(target),cssClasses:getClasses(target),fullPath:getFullPath(target),
+      accessibility:getA11yInfo(target),computedStyles:getComputedSnapshot(target),
+      elementInfo:elementInfo(target),target,screenshotEnabled:!!screenshot};
+    state.annotations.push(a);updateCount();renderMarkers();
+    window.dispatchEvent(new CustomEvent('annotate:created',{detail:a}));return a;
+  }
+  async function addAnnotation({target,comment,kind,screenshot}={}) {
+    try {const node=typeof target==='string'?document.querySelector(target):target;
+      if(!(node instanceof Element) || node===host || root.contains(node))throw new Error('Annotation target not found');
+      const a=makeAnnotation(node,comment,kind,screenshot==null?config.screenshot:screenshot);
+      if(a.screenshotEnabled) await captureAnnotation(a);
+      return Object.assign({},a,{target:undefined,blob:undefined});
+    }catch(e){window.dispatchEvent(new CustomEvent('annotate:error',{detail:e}));throw e;}
+  }
+  let canvasLoading;
+  function loadCanvas() {
+    if(window.html2canvas) return Promise.resolve(window.html2canvas);
+    if(!canvasLoading) canvasLoading=new Promise((resolve,reject)=>{
+      const vendor=document.createElement('script'); vendor.src=config.vendorUrl || new URL('vendor/html2canvas.min.js',script && script.src || location.href).href;
+      vendor.onload=()=>window.html2canvas?resolve(window.html2canvas):reject(new Error('Screenshot vendor unavailable'));
+      vendor.onerror=()=>reject(new Error('Screenshot vendor blocked'));document.head.appendChild(vendor);
+    }).catch(e=>{canvasLoading=null;throw e;});
+    return canvasLoading;
+  }
+  async function captureAnnotation(a) {
+    const r=a.target && a.target.getBoundingClientRect() || a.boundingBox;
+    const padding=config.screenshotPadding == null?120:Math.max(0,Number(config.screenshotPadding));
+    const region=config.screenshotRegion==='viewport' ? {x:0,y:0,width:innerWidth,height:innerHeight} : {
+      x:Math.max(0,Math.floor(r.x-padding)), y:Math.max(0,Math.floor(r.y-padding)),
+      width:0,height:0};
+    if(config.screenshotRegion!=='viewport') {region.width=Math.max(1,Math.ceil(Math.min(innerWidth, r.right+padding)-region.x));region.height=Math.max(1,Math.ceil(Math.min(innerHeight,r.bottom+padding)-region.y));}
+    const maskSelectors=['input[type="password"]',...(config.maskSelectors||[])];
+    if(config.maskAllInputs) maskSelectors.push('input','textarea');
+    const hidden=host.style.getPropertyValue('visibility'); host.style.setProperty('visibility','hidden','important');
+    try {
+      const canvas=config.screenshotRenderer==='html2canvas' ? await (await loadCanvas())(document.body,{backgroundColor:'#ffffff',useCORS:false,allowTaint:false,
+        foreignObjectRendering:false,logging:false,scale:1,x:region.x+scrollX,y:region.y+scrollY,width:region.width,height:region.height,
+        ignoreElements:node=>node===host,
+        onclone:doc=>{for(const selector of maskSelectors) {try {for(const node of doc.querySelectorAll(selector)) {
+          const cover=doc.createElement('span'),rect=node.getBoundingClientRect();
+          cover.style.setProperty('position','absolute');cover.style.setProperty('left',(rect.left+scrollX)+'px');cover.style.setProperty('top',(rect.top+scrollY)+'px');
+          cover.style.setProperty('width',rect.width+'px');cover.style.setProperty('height',rect.height+'px');
+          cover.style.setProperty('background','#222');cover.style.setProperty('z-index','2147483646');doc.body.appendChild(cover);
+        }}catch(_){} }
+        }
+      }) : safeCanvas(region);
+      const type=config.screenshotType==='image/jpeg'?'image/jpeg':'image/png';
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,type,config.screenshotQuality||0.9));
+      if(!blob)throw new Error('Screenshot export failed');
+      a.blob=blob;a.screenshot={part:'screenshot-'+a.id,width:canvas.width,height:canvas.height,type:blob.type,region};
+      return blob;
+    }finally {host.style.setProperty('visibility',hidden||'visible','important');}
+  }
+  function pageContext() {
+    const keys={url:safeUrl(location.href),title:document.title,referrer:safeUrl(document.referrer||location.href),
+      viewport:{width:innerWidth,height:innerHeight},devicePixelRatio:devicePixelRatio,userAgent:navigator.userAgent,
+      language:navigator.language,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timestamp:new Date().toISOString()};
+    for(const key of Object.keys(keys))if(config.context[key]===false)delete keys[key];return keys;
+  }
+  async function buildPayload({kind,title,reporter}={}) {
+    const files={};const annotations=[];
+    for(const a of state.annotations) {
+      if(a.screenshotEnabled && !a.blob && a.target)await captureAnnotation(a);
+      const item={id:a.id,comment:a.comment,element:a.elementInfo||{name:a.element,path:a.elementPath}};
+      if(a.blob && a.screenshot){item.screenshot=a.screenshot;files[a.screenshot.part]=a.blob;}annotations.push(item);
+    }
+    const appVersion=typeof config.appVersion==='function'?config.appVersion():config.appVersion ||
+      document.querySelector('meta[name="app-version"],meta[name="version"]')?.content || '';
+    const payload={schema:'annotate-html/feedback@1',id:crypto.randomUUID(),kind:kind||'bug',title:title||'',
+      createdAt:new Date().toISOString(),reporter:reporter||{type:'human'},page:pageContext(),app:{version:appVersion},
+      annotations,console:config.context.console===false?[]:consoleEvents.slice(),
+      network:config.context.network===false?[]:networkEvents.slice(),markdown:generateOutput()};
+    return {payload,files};
+  }
+  async function submitFeedback(options={}) {
+    try {const {payload,files}=await buildPayload(options);let result;
+      if(config.onSubmit)result=await config.onSubmit(payload,files);
+      else {if(!config.endpoint)throw new Error('No endpoint configured');const form=new FormData();
+        form.append('payload',JSON.stringify(payload));for(const [name,blob] of Object.entries(files))form.append(name,blob,name+'.'+(blob.type==='image/jpeg'?'jpg':'png'));
+        const response=await fetch(config.endpoint,{method:'POST',credentials:'same-origin',headers:config.headers||{},body:form});
+        if(!response.ok)throw new Error('Submit failed: HTTP '+response.status);
+        result=await response.json().catch(()=>({message:'Submitted'}));
+      }
+      window.dispatchEvent(new CustomEvent('annotate:submitted',{detail:{payload,result}}));
+      if(config.clearOnSubmit)clearAll();return result;
+    }catch(e){window.dispatchEvent(new CustomEvent('annotate:error',{detail:e}));throw e;}
+  }
+  function showSubmitForm() {
+    closePopup();popup=el('div',{id:'ann-popup'});popup.classList.add('ann-submit-form');
+    const heading=el('strong',{},'Submit feedback'),kind=el('select',{'aria-label':'Kind'});
+    for(const value of config.kinds)kind.appendChild(el('option',{value},value));
+    const title=el('input',{type:'text',placeholder:'Title','aria-label':'Title'});
+    const status=el('div',{id:'ann-submit-status'}), actions=el('div',{className:'ann-popup-actions'});
+    const cancel=el('button',{onClick:closePopup},'Cancel'),send=el('button',{className:'primary'},'Submit');
+    send.onclick=async()=>{send.disabled=true;status.textContent='';try{const result=await submitFeedback({kind:kind.value,title:title.value});
+      status.textContent=String(result && result.message || 'Submitted');
+      if(result && result.url) {const url=new URL(result.url,location.href);if(['http:','https:'].includes(url.protocol)){
+        const link=el('a',{href:url.href,target:'_blank',rel:'noopener noreferrer'},url.href);status.appendChild(link);}}
+    }catch(e){status.textContent=e.message;send.textContent=t('Retry');}finally{send.disabled=false;}};
+    actions.append(cancel,send);popup.append(heading,kind,title,status,actions);
+    popup.style.left=Math.max(12,innerWidth-420)+'px';popup.style.top=Math.max(12,innerHeight-330)+'px';root.appendChild(popup);
   }
 
   // Boot when DOM ready
