@@ -1,0 +1,25 @@
+{
+  "name": "annotate-html",
+  "version": "1.0.0",
+  "description": "Embeddable page-feedback widget",
+  "main": "annotate.js",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaoyaner0201/annotate-html.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/xiaoyaner0201/annotate-html/issues"
+  },
+  "homepage": "https://github.com/xiaoyaner0201/annotate-html#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "ajv": "^8.20.0"
+  }
+}
